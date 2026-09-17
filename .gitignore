@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets & local data
+.env
+credentials/*.json
+!credentials/.gitkeep
+data/
+uploads/*
+!uploads/.gitkeep
+
+# IDE
+.idea/
+.vscode/
