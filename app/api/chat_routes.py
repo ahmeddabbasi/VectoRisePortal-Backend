@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.user import User
+from app.schemas.hrm import AnnouncementOut
+from app.services.announcements import AnnouncementService
 from app.services.chat import ChatService
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -22,6 +24,22 @@ class DirectChatCreate(BaseModel):
 
 class MessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=5000)
+
+
+@router.get("/announcements", response_model=list[AnnouncementOut])
+def list_announcements(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    rows = AnnouncementService(db).list_all()
+    users = {u.id: u.email for u in db.query(User).filter(User.id.in_({r.created_by_user_id for r in rows})).all()}
+    return [
+        AnnouncementOut(
+            id=r.id,
+            title=r.title,
+            body=r.body,
+            created_by_name=users.get(r.created_by_user_id),
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
 
 
 @router.get("/conversations")

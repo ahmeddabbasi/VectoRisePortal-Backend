@@ -10,6 +10,8 @@ from app.models.department import Department
 from app.models.employee import Employee
 from app.models.user import User
 from app.schemas.hrm import (
+    AnnouncementCreate,
+    AnnouncementOut,
     DepartmentCreate,
     DepartmentOut,
     DepartmentUpdate,
@@ -20,6 +22,7 @@ from app.schemas.hrm import (
     PerformanceScoreOut,
     SettingsUpdate,
 )
+from app.services.announcements import AnnouncementService
 from app.services.attendance import AttendanceService
 from app.services.audit import AuditService
 from app.services.auth import hash_password
@@ -261,6 +264,43 @@ def list_evaluations(employee_id: int | None = None, db: Session = Depends(get_d
         }
         for r in rows
     ]
+
+
+@router.get("/announcements", response_model=list[AnnouncementOut])
+def list_announcements(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    rows = AnnouncementService(db).list_all()
+    users = {u.id: u.email for u in db.query(User).filter(User.id.in_({r.created_by_user_id for r in rows})).all()}
+    return [
+        AnnouncementOut(
+            id=r.id,
+            title=r.title,
+            body=r.body,
+            created_by_name=users.get(r.created_by_user_id),
+            created_at=r.created_at,
+            recipient_count=None,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/announcements", response_model=AnnouncementOut)
+def create_announcement(
+    payload: AnnouncementCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    ann = AnnouncementService(db).broadcast(admin, payload.title, payload.body)
+    db.commit()
+    db.refresh(ann)
+    employee_count = db.query(User).filter(User.role == "employee", User.is_active.is_(True)).count()
+    return AnnouncementOut(
+        id=ann.id,
+        title=ann.title,
+        body=ann.body,
+        created_by_name=admin.email,
+        created_at=ann.created_at,
+        recipient_count=employee_count,
+    )
 
 
 @router.post("/performance/{employee_id}/calculate", response_model=PerformanceScoreOut)

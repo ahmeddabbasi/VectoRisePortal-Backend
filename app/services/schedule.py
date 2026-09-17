@@ -8,6 +8,7 @@ from app.models.enums import ExceptionType, ScheduleChangeStatus, ScheduleStatus
 from app.models.schedule_change_request import ScheduleChangeRequest
 from app.models.user import User
 from app.models.work_schedule import WorkSchedule
+from app.core.violations import raise_violation
 from app.services.audit import AuditService
 from app.services.exceptions import ExceptionService
 from app.services.settings_service import SettingsService
@@ -46,7 +47,7 @@ class ScheduleService:
     ) -> list[WorkSchedule]:
         existing = self.get_week_schedules(employee.id, week_start)
         if existing and any(s.status == ScheduleStatus.LOCKED for s in existing):
-            raise HTTPException(status_code=400, detail="Schedule is locked for this week")
+            raise_violation(self.db, "schedule_locked", status_code=400)
 
         results = []
         for day in days:
@@ -92,11 +93,14 @@ class ScheduleService:
         for employee in employees:
             schedules = self.get_week_schedules(employee.id, next_week)
             if not schedules:
+                week_key = int(next_week.strftime("%Y%m%d"))
                 self.exceptions.create(
                     employee.id,
                     ExceptionType.LATE_SCHEDULE,
                     "Missed schedule submission",
                     f"No schedule submitted for week starting {next_week.isoformat()}",
+                    "schedule_week",
+                    week_key,
                 )
                 continue
             for schedule in schedules:
@@ -115,15 +119,15 @@ class ScheduleService:
             status=ScheduleChangeStatus.PENDING,
         )
         self.db.add(request)
+        self.db.flush()
         self.exceptions.create(
             employee.id,
             ExceptionType.SCHEDULE_CHANGE,
             "Schedule change request",
             reason,
             "schedule_change_request",
-            None,
+            request.id,
         )
-        self.db.flush()
         return request
 
     def review_change(self, request_id: int, admin: User, status: str, admin_response: str | None = None):

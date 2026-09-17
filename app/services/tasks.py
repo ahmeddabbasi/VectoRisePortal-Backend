@@ -10,6 +10,7 @@ from app.models.task import Task
 from app.models.task_checklist_item import TaskChecklistItem
 from app.models.task_time_log import TaskTimeLog
 from app.models.user import User
+from app.core.violations import raise_violation
 from app.services.audit import AuditService
 from app.services.exceptions import ExceptionService
 from app.services.notifications import NotificationService
@@ -150,9 +151,9 @@ class TaskService:
 
     def _ensure_task_actionable(self, task: Task):
         if task.status == TaskStatus.PENDING_APPROVAL:
-            raise HTTPException(status_code=400, detail="Task is awaiting admin approval")
+            raise_violation(None, "task_pending_approval", status_code=400)
         if task.status == TaskStatus.REJECTED:
-            raise HTTPException(status_code=400, detail="Task was rejected by admin")
+            raise_violation(None, "task_rejected", status_code=400)
 
     def update_task(self, task_id: int, data: dict, user: User | None = None, employee_owned: bool = False) -> Task:
         task = self.db.get(Task, task_id)
@@ -213,9 +214,9 @@ class TaskService:
     def stop_timer(self, log_id: int, employee_id: int | None = None) -> TaskTimeLog:
         log = self.db.get(TaskTimeLog, log_id)
         if not log or log.ended_at:
-            raise HTTPException(status_code=400, detail="Invalid time log")
+            raise_violation(None, "invalid_time_log", status_code=400)
         if employee_id is not None and log.employee_id != employee_id:
-            raise HTTPException(status_code=403, detail="Not your time log")
+            raise_violation(None, "not_your_time_log", status_code=403)
         now = datetime.utcnow()
         log.ended_at = now
         log.duration_minutes = int((now - log.started_at).total_seconds() // 60)
@@ -240,6 +241,32 @@ class TaskService:
         if limit:
             q = q.limit(limit)
         return q.all()
+
+    def list_tasks_due_today(self, employee_id: int, limit: int = 10) -> list[Task]:
+        today = date.today()
+        active_statuses = [
+            TaskStatus.NOT_STARTED,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.BLOCKED,
+            TaskStatus.OVERDUE,
+        ]
+        priority_order = case(
+            (Task.priority == "urgent", 0),
+            (Task.priority == "high", 1),
+            (Task.priority == "medium", 2),
+            else_=3,
+        )
+        return (
+            self.db.query(Task)
+            .filter(
+                Task.assigned_employee_id == employee_id,
+                Task.due_date == today,
+                Task.status.in_(active_statuses),
+            )
+            .order_by(priority_order, Task.created_at.asc())
+            .limit(limit)
+            .all()
+        )
 
     def dashboard_stats(self, employee_id: int | None = None) -> dict:
         today = date.today()

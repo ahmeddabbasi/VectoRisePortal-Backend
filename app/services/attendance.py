@@ -9,6 +9,7 @@ from app.models.enums import AttendanceStatus, CheckEventType, ExceptionType
 from app.models.time_session import TimeSession
 from app.models.user import User
 from app.models.work_schedule import WorkSchedule
+from app.core.violations import raise_violation, violation
 from app.services.audit import AuditService
 from app.services.exceptions import ExceptionService
 from app.services.notifications import NotificationService
@@ -50,13 +51,18 @@ class AttendanceService:
         end = self._parse_time(self.settings.get("default_end_time", "17:00"))
         return datetime.combine(work_date, start), datetime.combine(work_date, end)
 
+    def _get_record(self, employee_id: int, work_date: date, for_update: bool = False) -> AttendanceRecord | None:
+        q = self.db.query(AttendanceRecord).filter(
+            AttendanceRecord.employee_id == employee_id,
+            AttendanceRecord.work_date == work_date,
+        )
+        if for_update:
+            q = q.with_for_update()
+        return q.first()
+
     def get_or_create_record(self, employee_id: int, work_date: date | None = None) -> AttendanceRecord:
         work_date = work_date or date.today()
-        record = (
-            self.db.query(AttendanceRecord)
-            .filter(AttendanceRecord.employee_id == employee_id, AttendanceRecord.work_date == work_date)
-            .first()
-        )
+        record = self._get_record(employee_id, work_date)
         if record:
             return record
         scheduled_start, scheduled_end = self._scheduled_times(employee_id, work_date)
@@ -74,9 +80,12 @@ class AttendanceService:
     def check_in(self, employee: Employee, user: User | None = None) -> dict:
         now = datetime.utcnow()
         work_date = now.date()
-        record = self.get_or_create_record(employee.id, work_date)
+        record = self._get_record(employee.id, work_date, for_update=True)
+        if not record:
+            record = self.get_or_create_record(employee.id, work_date)
+            record = self._get_record(employee.id, work_date, for_update=True) or record
         if record.check_in_at:
-            raise HTTPException(status_code=400, detail="Already checked in today")
+            raise_violation(self.db, "already_checked_in", status_code=400)
 
         grace = self.settings.get_int("check_in_grace_minutes", 15)
         scheduled_start = record.scheduled_start
@@ -95,7 +104,7 @@ class AttendanceService:
         else:
             check_in_status = AttendanceStatus.LATE
             locked = True
-            exc = self.exceptions.create(
+            exc_result = self.exceptions.create(
                 employee.id,
                 ExceptionType.LATE_CHECK_IN,
                 "Late check-in",
@@ -103,20 +112,17 @@ class AttendanceService:
                 "attendance_record",
                 record.id,
             )
-            if user:
+            if user and exc_result.created:
                 self.notifications.create(
                     user.id,
                     "Late check-in recorded",
                     "Your check-in was after the grace period. An exception has been created for admin review.",
                     "attendance",
-                    "/employee/attendance",
+                    "/employee/exceptions",
                 )
 
         if locked:
-            raise HTTPException(
-                status_code=403,
-                detail="Check-in window closed. Contact admin for exception review.",
-            )
+            raise_violation(self.db, "check_in_window_closed", status_code=403, commit=True)
 
         record.check_in_at = now
         record.check_in_status = check_in_status
@@ -132,16 +138,22 @@ class AttendanceService:
         if user:
             self.audit.log("check_in", user, "attendance_record", record.id, None, {"check_in_at": now.isoformat()})
         self.db.flush()
-        return {"record": record, "status": check_in_status, "session": session}
+        result = {"record": record, "status": check_in_status, "session": session}
+        if check_in_status == AttendanceStatus.LATE:
+            result["notice"] = violation("late_check_in")
+        return result
 
     def check_out(self, employee: Employee, user: User | None = None) -> dict:
         now = datetime.utcnow()
         work_date = now.date()
-        record = self.get_or_create_record(employee.id, work_date)
+        record = self._get_record(employee.id, work_date, for_update=True)
+        if not record:
+            record = self.get_or_create_record(employee.id, work_date)
+            record = self._get_record(employee.id, work_date, for_update=True) or record
         if not record.check_in_at:
-            raise HTTPException(status_code=400, detail="Must check in before checking out")
+            raise_violation(self.db, "must_check_in_first", status_code=400)
         if record.check_out_at:
-            raise HTTPException(status_code=400, detail="Already checked out today")
+            raise_violation(self.db, "already_checked_out", status_code=400)
 
         grace = self.settings.get_int("check_out_grace_minutes", 15)
         scheduled_end = record.scheduled_end
@@ -150,8 +162,10 @@ class AttendanceService:
             record.scheduled_end = scheduled_end
 
         grace_end = scheduled_end + timedelta(minutes=grace)
+        notice = None
         if now < scheduled_end - timedelta(minutes=grace):
             checkout_status = AttendanceStatus.EARLY
+            notice = violation("early_check_out")
         elif now <= grace_end:
             checkout_status = AttendanceStatus.ON_TIME
         else:
@@ -164,6 +178,7 @@ class AttendanceService:
                 "attendance_record",
                 record.id,
             )
+            notice = violation("late_check_out")
 
         record.check_out_at = now
         record.check_out_status = checkout_status
@@ -186,7 +201,10 @@ class AttendanceService:
         if user:
             self.audit.log("check_out", user, "attendance_record", record.id, None, {"check_out_at": now.isoformat()})
         self.db.flush()
-        return {"record": record, "status": checkout_status}
+        result = {"record": record, "status": checkout_status}
+        if notice:
+            result["notice"] = notice
+        return result
 
     def admin_correct(
         self,

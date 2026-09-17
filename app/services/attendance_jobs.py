@@ -34,7 +34,7 @@ class AttendanceJobService:
                 updated += 1
 
             if record.check_in_at and not record.check_out_at:
-                self.exceptions.create(
+                result = self.exceptions.create(
                     employee.id,
                     ExceptionType.MISSING_CHECK_OUT,
                     "Missing checkout",
@@ -43,11 +43,12 @@ class AttendanceJobService:
                     record.id,
                 )
                 record.status = AttendanceStatus.INCOMPLETE
-                created += 1
+                if result.created:
+                    created += 1
             elif not record.check_in_at and not record.check_out_at:
                 status = AttendanceStatus.ABSENT if policy == "absent" else AttendanceStatus.INCOMPLETE
                 record.status = status
-                self.exceptions.create(
+                result = self.exceptions.create(
                     employee.id,
                     ExceptionType.MISSING_CHECK_IN,
                     "Missing attendance",
@@ -55,11 +56,12 @@ class AttendanceJobService:
                     "attendance_record",
                     record.id,
                 )
-                created += 1
+                if result.created:
+                    created += 1
             elif record.check_in_at and record.check_out_at and record.total_minutes:
                 max_daily = self.settings.get_int("daily_max_hours", 10) * 60
                 if record.total_minutes > max_daily:
-                    self.exceptions.create(
+                    result = self.exceptions.create(
                         employee.id,
                         ExceptionType.EXCESSIVE_HOURS,
                         "Excessive working hours",
@@ -67,7 +69,8 @@ class AttendanceJobService:
                         "attendance_record",
                         record.id,
                     )
-                    created += 1
+                    if result.created:
+                        created += 1
 
         return {"date": work_date.isoformat(), "exceptions_created": created, "records_updated": updated}
 

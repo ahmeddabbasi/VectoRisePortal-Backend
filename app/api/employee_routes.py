@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 
 from app.core.deps import require_employee
+from app.core.violations import raise_violation
 from app.database import get_db
 from app.models.employee import Employee
 from app.models.task import Task
@@ -60,6 +61,7 @@ def employee_dashboard(user: User = Depends(require_employee), db: Session = Dep
     week_start = today - timedelta(days=today.weekday())
     schedules = schedule_svc.get_week_schedules(employee.id, week_start + timedelta(days=7))
     task_summary = task_svc.task_summary(employee.id)
+    tasks_today = task_svc.list_tasks_due_today(employee.id)
     notifications = NotificationService(db).list_for_user(user.id, unread_only=True, limit=5, days=3)
     return {
         "date": today.isoformat(),
@@ -67,6 +69,7 @@ def employee_dashboard(user: User = Depends(require_employee), db: Session = Dep
         "attendance": AttendanceRecordOut.model_validate(record),
         "is_checked_in": bool(record.check_in_at and not record.check_out_at),
         "tasks": task_summary,
+        "tasks_today": [TaskOut.model_validate(task) for task in tasks_today],
         "schedule_submitted": len(schedules) > 0,
         "notifications": [NotificationOut.model_validate(n) for n in notifications],
         "weekly_tasks_completed": task_summary["completed"],
@@ -111,7 +114,11 @@ def check_in(user: User = Depends(require_employee), db: Session = Depends(get_d
     employee = _require_employee_record(user, db)
     result = AttendanceService(db).check_in(employee, user)
     db.commit()
-    return {"status": result["status"], "record": AttendanceRecordOut.model_validate(result["record"])}
+    return {
+        "status": result["status"],
+        "record": AttendanceRecordOut.model_validate(result["record"]),
+        "notice": result.get("notice"),
+    }
 
 
 @router.post("/attendance/check-out")
@@ -119,7 +126,11 @@ def check_out(user: User = Depends(require_employee), db: Session = Depends(get_
     employee = _require_employee_record(user, db)
     result = AttendanceService(db).check_out(employee, user)
     db.commit()
-    return {"status": result["status"], "record": AttendanceRecordOut.model_validate(result["record"])}
+    return {
+        "status": result["status"],
+        "record": AttendanceRecordOut.model_validate(result["record"]),
+        "notice": result.get("notice"),
+    }
 
 
 @router.get("/attendance", response_model=list[AttendanceRecordOut])
@@ -179,7 +190,7 @@ def update_my_task(task_id: int, payload: TaskUpdate, user: User = Depends(requi
     employee = _require_employee_record(user, db)
     task = db.get(Task, task_id)
     if not task or task.assigned_employee_id != employee.id:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_violation(db, "task_not_found", status_code=404)
     updated = TaskService(db).update_task(
         task_id, payload.model_dump(exclude_unset=True), user, employee_owned=True
     )
@@ -192,7 +203,7 @@ def toggle_checklist(task_id: int, item_id: int, completed: bool = True, user: U
     employee = _require_employee_record(user, db)
     task = db.get(Task, task_id)
     if not task or task.assigned_employee_id != employee.id:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_violation(db, "task_not_found", status_code=404)
     TaskService(db).toggle_checklist_item(item_id, completed, user)
     db.commit()
     return {"status": "ok"}
@@ -248,11 +259,18 @@ def my_exceptions(user: User = Depends(require_employee), db: Session = Depends(
 @router.post("/exceptions/{exception_id}/explain")
 def explain_exception(exception_id: int, payload: ExceptionExplain, user: User = Depends(require_employee), db: Session = Depends(get_db)):
     from app.models.exception_record import ExceptionRecord
+    employee = _require_employee_record(user, db)
     record = db.get(ExceptionRecord, exception_id)
     if not record or record.employee_id != user.employee_id:
-        raise HTTPException(status_code=404, detail="Exception not found")
+        raise_violation(db, "exception_not_found", status_code=404)
     record.employee_explanation = payload.explanation
     record.status = "under_review"
+    NotificationService(db).notify_admins(
+        f"Exception explanation: {record.title}",
+        f"{employee.name} submitted an explanation for review.",
+        "exception",
+        "/admin/exceptions",
+    )
     db.commit()
     return {"status": "ok"}
 

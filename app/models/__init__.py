@@ -1,4 +1,5 @@
 from app.models.activity import Activity
+from app.models.announcement import Announcement
 from app.models.chat import ChatConversation, ChatMessage, ChatParticipant
 from app.models.attendance_record import AttendanceRecord
 from app.models.audit_log import AuditLog
@@ -23,6 +24,7 @@ from app.models.work_schedule import WorkSchedule
 
 __all__ = [
     "Activity",
+    "Announcement",
     "ChatConversation",
     "ChatMessage",
     "ChatParticipant",

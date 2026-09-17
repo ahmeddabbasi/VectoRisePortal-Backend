@@ -193,6 +193,7 @@ class TaskOut(BaseModel):
     status: str
     progress: int
     task_type: str | None = None
+    notes: str | None = None
     created_at: datetime
     completed_at: datetime | None = None
     checklist_items: list[ChecklistItemOut] = []
@@ -230,6 +231,20 @@ class NotificationOut(BaseModel):
     link: str | None = None
     is_read: bool
     created_at: datetime
+
+
+class AnnouncementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(min_length=1, max_length=5000)
+
+
+class AnnouncementOut(BaseModel):
+    id: int
+    title: str
+    body: str
+    created_by_name: str | None = None
+    created_at: datetime
+    recipient_count: int | None = None
 
 
 class PerformanceScoreOut(BaseModel):
