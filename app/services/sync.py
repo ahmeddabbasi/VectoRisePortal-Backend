@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
+import json
 
 from sqlalchemy.orm import Session
 
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.models.department import Department
 from app.seed_config import DEFAULT_SOURCES, DEFAULT_TARGETS
 from app.services.auth import hash_password
+from app.services.column_map import apply_column_map
 from app.services.normalize import row_to_lead_record
 from app.services.settings_service import SettingsService
 from app.services.sheets_client import GoogleSheetsClient, _resolve_credentials_path
@@ -72,6 +74,7 @@ def seed_database(db: Session):
                     hashed_password=hash_password("employee123"),
                     role="employee",
                     employee_id=employee.id,
+                    sales_access=True,
                 )
             )
         elif not user.employee_id:
@@ -243,9 +246,11 @@ class SyncService:
         titles: dict[int, str],
         duplicate_map: dict[str, list[int]],
     ) -> tuple[int, int, int]:
-        title = titles.get(source.sheet_gid) or source.name
+        spreadsheet_id = source.spreadsheet_id or settings.google_spreadsheet_id
+        sheet_titles = titles if spreadsheet_id == settings.google_spreadsheet_id else self.client.get_sheet_titles(spreadsheet_id)
+        title = sheet_titles.get(source.sheet_gid) or source.sheet_title or source.name
         source.sheet_title = title
-        rows = self.client.fetch_sheet_rows(settings.google_spreadsheet_id, title)
+        rows = self.client.fetch_sheet_rows(spreadsheet_id, title)
         employee = (
             self.db.query(Employee)
             .filter(Employee.name == source.employee_name)
@@ -258,9 +263,10 @@ class SyncService:
         rows_processed = 0
         activities_upserted = 0
 
+        column_map = json.loads(source.column_map) if source.column_map else None
         for idx, row in enumerate(rows, start=2):
             record = row_to_lead_record(
-                row,
+                apply_column_map(row, column_map, source.data_type),
                 row_number=idx,
                 source={
                     "name": source.name,
@@ -270,7 +276,7 @@ class SyncService:
                     "data_type": source.data_type,
                 },
                 employee_id=employee.id,
-                spreadsheet_id=settings.google_spreadsheet_id,
+                spreadsheet_id=spreadsheet_id,
             )
             if not record:
                 continue

@@ -83,3 +83,4 @@ class DataSourceResponse(BaseModel):
     is_active: bool
     last_sync_at: datetime | None
     last_sync_status: str | None
+    column_map: str | None = None

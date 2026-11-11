@@ -15,6 +15,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), default="employee")
     employee_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), unique=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sales_access: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    can_review_tasks: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     employee: Mapped["Employee | None"] = relationship(back_populates="user")

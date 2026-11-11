@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
+from app.core.lockout import login_guard
 from app.database import get_db
 from app.models.employee import Employee
 from app.models.user import User
@@ -13,19 +14,25 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    login_guard.check(ip, payload.email)
     user = authenticate_user(db, payload.email, payload.password)
     if not user:
+        login_guard.fail(ip, payload.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    login_guard.succeed(payload.email)
     employee = db.get(Employee, user.employee_id) if user.employee_id else None
     AuditService(db).log("login", user)
     db.commit()
     return TokenResponse(
-        access_token=create_access_token(user.email, user.role, user.employee_id),
+        access_token=create_access_token(user.email, user.role, user.employee_id, user.token_version or 0),
         role=user.role,
         employee_id=user.employee_id,
         name=employee.name if employee else None,
         email=user.email,
+        sales_access=user.role == "admin" or bool(user.sales_access),
+        can_review_tasks=user.role == "admin" or bool(user.can_review_tasks),
     )
 
 
@@ -39,6 +46,8 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
         employee_id=user.employee_id,
         is_active=user.is_active,
         name=employee.name if employee else None,
+        sales_access=user.role == "admin" or bool(user.sales_access),
+        can_review_tasks=user.role == "admin" or bool(user.can_review_tasks),
     )
 
 
@@ -47,6 +56,10 @@ def change_password(payload: PasswordChange, user: User = Depends(get_current_us
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     user.hashed_password = hash_password(payload.new_password)
+    user.token_version = int(user.token_version or 0) + 1
     AuditService(db).log("password_changed", user)
     db.commit()
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "access_token": create_access_token(user.email, user.role, user.employee_id, user.token_version),
+    }

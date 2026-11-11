@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_current_user
+from app.core.text_guard import optional_text, require_text
 from app.database import get_db
 from app.models.user import User
 from app.schemas.hrm import AnnouncementOut
@@ -13,17 +14,34 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 
 class ConversationCreate(BaseModel):
-    participant_user_ids: list[int] = Field(min_length=1)
+    participant_user_ids: list[int] = Field(min_length=1, max_length=8)
     title: str | None = None
+
+    @field_validator("participant_user_ids")
+    @classmethod
+    def positive_ids(cls, value: list[int]) -> list[int]:
+        if any(item <= 0 for item in value):
+            raise ValueError("Unsupported value")
+        return value
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value: str | None) -> str | None:
+        return optional_text(value, max_length=120, allow_newlines=False)
 
 
 class DirectChatCreate(BaseModel):
-    employee_id: int | None = None
-    user_id: int | None = None
+    employee_id: int | None = Field(default=None, gt=0)
+    user_id: int | None = Field(default=None, gt=0)
 
 
 class MessageCreate(BaseModel):
-    body: str = Field(min_length=1, max_length=5000)
+    body: str
+
+    @field_validator("body")
+    @classmethod
+    def clean_body(cls, value: str) -> str:
+        return require_text(value, max_length=4000)
 
 
 @router.get("/announcements", response_model=list[AnnouncementOut])
@@ -99,7 +117,6 @@ def list_chat_users(user: User = Depends(get_current_user), db: Session = Depend
     return [
         {
             "user_id": u.id,
-            "email": u.email,
             "role": u.role,
             "name": employees.get(u.employee_id) if u.employee_id else u.email,
             "employee_id": u.employee_id,

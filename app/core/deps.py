@@ -1,6 +1,7 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -18,16 +19,21 @@ def get_current_user(
     if not credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     try:
-        payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=["HS256"])
         email = payload.get("sub")
-        if not email:
+        if not email or payload.get("typ") != "access":
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    except JWTError:
+        token_version = int(payload.get("tv"))
+    except (JWTError, TypeError, ValueError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    user = db.query(User).filter(User.email == email, User.is_active.is_(True)).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    user = (
+        db.query(User)
+        .filter(func.lower(User.email) == str(email).lower(), User.is_active.is_(True))
+        .first()
+    )
+    if not user or int(user.token_version or 0) != token_version:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     return user
 
 
@@ -35,6 +41,18 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
+
+
+def require_sales_access(user: User = Depends(get_current_user)) -> User:
+    if user.role == UserRole.ADMIN or user.sales_access:
+        return user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sales access required")
+
+
+def require_task_review(user: User = Depends(get_current_user)) -> User:
+    if user.role == UserRole.ADMIN or user.can_review_tasks:
+        return user
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Task review access required")
 
 
 def require_employee(user: User = Depends(get_current_user)) -> User:

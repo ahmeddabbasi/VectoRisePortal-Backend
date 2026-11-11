@@ -25,10 +25,11 @@ from app.schemas.hrm import (
 from app.services.announcements import AnnouncementService
 from app.services.attendance import AttendanceService
 from app.services.audit import AuditService
+from app.services.employee_admin import delete_employee as remove_employee
 from app.services.auth import hash_password
 from app.services.metrics import MetricsService
 from app.services.performance import PerformanceService
-from app.services.settings_service import SettingsService
+from app.services.settings_service import DEFAULT_SETTINGS, SettingsService
 from app.services.tasks import TaskService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -36,6 +37,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 def _employee_out(emp: Employee) -> EmployeeOut:
     dept = emp.department
+    user = emp.user
     return EmployeeOut(
         id=emp.id,
         employee_code=emp.employee_code,
@@ -49,6 +51,8 @@ def _employee_out(emp: Employee) -> EmployeeOut:
         joining_date=emp.joining_date,
         profile_photo_url=emp.profile_photo_url,
         department_name=dept.name if dept else None,
+        sales_access=bool(user.sales_access) if user else False,
+        can_review_tasks=bool(user.can_review_tasks) if user else False,
     )
 
 
@@ -100,6 +104,8 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db), admi
         hashed_password=hash_password(payload.password),
         role=payload.role,
         employee_id=employee.id,
+        sales_access=payload.sales_access,
+        can_review_tasks=payload.can_review_tasks,
     )
     db.add(user)
     AuditService(db).log("employee_created", admin, "employee", employee.id, None, {"name": employee.name})
@@ -115,19 +121,37 @@ def update_employee(employee_id: int, payload: EmployeeUpdate, db: Session = Dep
         raise HTTPException(status_code=404, detail="Employee not found")
     previous = {"name": employee.name, "status": employee.status, "email": employee.email}
     data = payload.model_dump(exclude_unset=True)
+    sales_access = data.pop("sales_access", None)
+    can_review_tasks = data.pop("can_review_tasks", None)
+    user = db.query(User).filter(User.employee_id == employee.id).first()
     if "email" in data and data["email"]:
         existing = db.query(User).filter(User.email == data["email"]).first()
         if existing and existing.employee_id != employee.id:
             raise HTTPException(status_code=400, detail="Email already in use")
-        user = db.query(User).filter(User.employee_id == employee.id).first()
         if user:
             user.email = data["email"]
     for field, value in data.items():
         setattr(employee, field, value)
+    if user and ("role" in data or "status" in data):
+        if "role" in data and data["role"]:
+            user.role = data["role"]
+        if "status" in data and data["status"]:
+            user.is_active = data["status"] == "active"
+        user.token_version = int(user.token_version or 0) + 1
+    if user and sales_access is not None:
+        user.sales_access = sales_access
+    if user and can_review_tasks is not None:
+        user.can_review_tasks = can_review_tasks
     AuditService(db).log("employee_updated", admin, "employee", employee.id, previous, data)
     db.commit()
     db.refresh(employee)
     return _employee_out(employee)
+
+
+@router.delete("/employees/{employee_id}")
+def delete_employee(employee_id: int, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    remove_employee(db, employee_id, admin)
+    return {"status": "deleted"}
 
 
 @router.get("/departments", response_model=list[DepartmentOut])
@@ -187,6 +211,8 @@ def get_settings(db: Session = Depends(get_db), _: User = Depends(require_admin)
 def update_settings(payload: SettingsUpdate, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     service = SettingsService(db)
     for key, value in payload.settings.items():
+        if key not in DEFAULT_SETTINGS:
+            continue
         service.set(key, value)
     AuditService(db).log("settings_updated", admin, "system_settings", None, None, payload.settings)
     db.commit()
@@ -317,3 +343,50 @@ def calculate_performance(
     db.commit()
     db.refresh(score)
     return score
+
+
+@router.get("/task-documents")
+def list_task_documents(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from app.models.task import Task
+    from app.models.task_document import TaskDocument
+
+    rows = (
+        db.query(TaskDocument, Task, Employee)
+        .join(Task, Task.id == TaskDocument.task_id)
+        .join(Employee, Employee.id == Task.employee_id)
+        .order_by(TaskDocument.id.desc())
+        .limit(200)
+        .all()
+    )
+    return [
+        {
+            "id": doc.id,
+            "task_id": task.id,
+            "task_title": task.title,
+            "employee_name": employee.name,
+            "original_name": doc.original_name,
+            "size_bytes": doc.size_bytes,
+            "created_at": doc.created_at,
+            "download_path": f"/api/media/tasks/{doc.stored_name}",
+        }
+        for doc, task, employee in rows
+    ]
+
+
+@router.get("/errors")
+def list_errors(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from app.models.error_report import ErrorReport
+
+    rows = db.query(ErrorReport).order_by(ErrorReport.id.desc()).limit(200).all()
+    return [
+        {
+            "id": row.id,
+            "created_at": row.created_at,
+            "method": row.method,
+            "path": row.path,
+            "status_code": row.status_code,
+            "message": row.message,
+            "actor_email": row.actor_email,
+        }
+        for row in rows
+    ]

@@ -72,8 +72,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_secrets(self):
-        if self.is_production and self.jwt_secret in {"", "change-me-in-production", "dev-secret-change-me"}:
-            raise ValueError("JWT_SECRET must be set to a strong unique value in production")
+        if self.jwt_algorithm != "HS256":
+            raise ValueError("JWT_ALGORITHM must be HS256")
+        if self.is_production:
+            self.debug = False
+            if self.jwt_secret in {"", "change-me-in-production", "dev-secret-change-me"} or len(self.jwt_secret) < 32:
+                raise ValueError("JWT_SECRET must be a unique value of at least 32 characters in production")
         return self
 
 

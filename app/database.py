@@ -145,6 +145,18 @@ def _ensure_postgres_indexes():
 
 
 
+def _add_column_if_missing(table: str, column_ddl: str):
+    column = column_ddl.split()[0]
+    inspector = inspect(engine)
+    if table not in inspector.get_table_names():
+        return
+    names = {col["name"] for col in inspector.get_columns(table)}
+    if column in names:
+        return
+    with engine.begin() as conn:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column_ddl}"))
+
+
 def migrate_schema():
 
     if _db_url.startswith("sqlite"):
@@ -163,7 +175,16 @@ def migrate_schema():
 
         _sqlite_add_column_if_missing("employees", "profile_photo_url", "profile_photo_url VARCHAR(500)")
 
+    _add_column_if_missing("users", "token_version INTEGER NOT NULL DEFAULT 0")
+    if _db_url.startswith("sqlite"):
+        _add_column_if_missing("users", "sales_access INTEGER NOT NULL DEFAULT 0")
+        _add_column_if_missing("users", "can_review_tasks INTEGER NOT NULL DEFAULT 0")
     else:
+        _add_column_if_missing("users", "sales_access BOOLEAN NOT NULL DEFAULT FALSE")
+        _add_column_if_missing("users", "can_review_tasks BOOLEAN NOT NULL DEFAULT FALSE")
+    _add_column_if_missing("data_sources", "column_map TEXT")
+
+    if not _db_url.startswith("sqlite"):
 
         _ensure_postgres_indexes()
 

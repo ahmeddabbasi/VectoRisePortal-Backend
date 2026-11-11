@@ -112,11 +112,12 @@ class ChatService:
 
     def create_conversation(self, creator: User, participant_user_ids: list[int], title: str | None = None) -> ChatConversation:
         unique_ids = sorted(set(participant_user_ids + [creator.id]))
-        if len(unique_ids) < 2:
-            raise HTTPException(status_code=400, detail="At least one other participant is required")
+        if len(unique_ids) < 2 or len(unique_ids) > 8:
+            raise HTTPException(status_code=400, detail="Choose between 1 and 7 other people")
         for uid in unique_ids:
-            if not self.db.get(User, uid):
-                raise HTTPException(status_code=400, detail=f"User {uid} not found")
+            member = self.db.get(User, uid)
+            if not member or not member.is_active:
+                raise HTTPException(status_code=400, detail="A participant is not available")
         conv = ChatConversation(title=title)
         self.db.add(conv)
         self.db.flush()

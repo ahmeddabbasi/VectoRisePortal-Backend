@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,6 +18,7 @@ class DataSource(Base):
     sheet_title: Mapped[str | None] = mapped_column(String(120))
     data_type: Mapped[str] = mapped_column(String(50), default="leads")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    column_map: Mapped[str | None] = mapped_column(Text)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_sync_status: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

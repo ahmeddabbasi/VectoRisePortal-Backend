@@ -1,7 +1,6 @@
 from datetime import date, timedelta
 
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
@@ -9,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 
 from app.core.deps import require_employee
+from app.core.text_guard import image_extension
 from app.core.violations import raise_violation
 from app.database import get_db
 from app.models.employee import Employee
@@ -102,8 +102,6 @@ def update_profile(payload: ProfileUpdate, user: User = Depends(require_employee
     employee = _require_employee_record(user, db)
     if payload.phone is not None:
         employee.phone = payload.phone
-    if payload.profile_photo_url is not None:
-        employee.profile_photo_url = payload.profile_photo_url
     AuditService(db).log("profile_updated", user, "employee", employee.id)
     db.commit()
     return get_profile(user, db)
@@ -204,7 +202,7 @@ def toggle_checklist(task_id: int, item_id: int, completed: bool = True, user: U
     task = db.get(Task, task_id)
     if not task or task.assigned_employee_id != employee.id:
         raise_violation(db, "task_not_found", status_code=404)
-    TaskService(db).toggle_checklist_item(item_id, completed, user)
+    TaskService(db).toggle_checklist_item(item_id, completed, user, task_id)
     db.commit()
     return {"status": "ok"}
 
@@ -232,19 +230,17 @@ async def upload_profile_photo(
     db: Session = Depends(get_db),
 ):
     employee = _require_employee_record(user, db)
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
     content = await file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
         raise HTTPException(status_code=400, detail=f"File exceeds {settings.max_upload_mb}MB limit")
-    ext = Path(file.filename or "photo.jpg").suffix.lower() or ".jpg"
-    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif"}:
-        raise HTTPException(status_code=400, detail="Unsupported image format")
+    ext = image_extension(content)
+    if not ext:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, GIF, and WebP images are allowed")
     filename = f"{employee.id}_{uuid.uuid4().hex}{ext}"
     dest = settings.upload_path / "profile" / filename
     dest.write_bytes(content)
-    employee.profile_photo_url = f"/uploads/profile/{filename}"
+    employee.profile_photo_url = f"/api/media/profile/{filename}"
     AuditService(db).log("profile_photo_uploaded", user, "employee", employee.id)
     db.commit()
     return {"profile_photo_url": employee.profile_photo_url}
@@ -320,3 +316,75 @@ def my_performance(user: User = Depends(require_employee), db: Session = Depends
             for e in evaluations
         ],
     }
+
+
+def _document_payload(doc, task: Task, employee_name: str | None):
+    return {
+        "id": doc.id,
+        "task_id": task.id,
+        "task_title": task.title,
+        "employee_name": employee_name,
+        "original_name": doc.original_name,
+        "size_bytes": doc.size_bytes,
+        "created_at": doc.created_at,
+        "download_path": f"/api/media/tasks/{doc.stored_name}",
+    }
+
+
+@router.get("/tasks/{task_id}/documents")
+def list_my_task_documents(task_id: int, user: User = Depends(require_employee), db: Session = Depends(get_db)):
+    employee = _require_employee_record(user, db)
+    task = db.get(Task, task_id)
+    if not task or task.employee_id != employee.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    from app.models.task_document import TaskDocument
+
+    docs = db.query(TaskDocument).filter(TaskDocument.task_id == task.id).order_by(TaskDocument.id.desc()).all()
+    return [_document_payload(doc, task, employee.name) for doc in docs]
+
+
+@router.post("/tasks/{task_id}/documents")
+async def upload_task_document(
+    task_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(require_employee),
+    db: Session = Depends(get_db),
+):
+    employee = _require_employee_record(user, db)
+    task = db.get(Task, task_id)
+    if not task or task.employee_id != employee.id:
+        raise HTTPException(status_code=404, detail="Task not found")
+    from app.models.task_document import TaskDocument
+    from app.services.task_files import store_task_file
+
+    stored, original, content_type, size = await store_task_file(task.id, file)
+    doc = TaskDocument(
+        task_id=task.id,
+        uploaded_by_user_id=user.id,
+        original_name=original,
+        stored_name=stored,
+        content_type=content_type,
+        size_bytes=size,
+    )
+    db.add(doc)
+    AuditService(db).log("task_document_uploaded", user, "task", task.id, None, {"name": original})
+    db.commit()
+    db.refresh(doc)
+    return _document_payload(doc, task, employee.name)
+
+
+@router.get("/reviews/documents")
+def review_documents(user: User = Depends(require_employee), db: Session = Depends(get_db)):
+    if not user.can_review_tasks:
+        raise HTTPException(status_code=403, detail="Task review access required")
+    from app.models.task_document import TaskDocument
+
+    rows = (
+        db.query(TaskDocument, Task, Employee)
+        .join(Task, Task.id == TaskDocument.task_id)
+        .join(Employee, Employee.id == Task.employee_id)
+        .order_by(TaskDocument.id.desc())
+        .limit(200)
+        .all()
+    )
+    return [_document_payload(doc, task, employee.name) for doc, task, employee in rows]

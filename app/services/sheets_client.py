@@ -70,3 +70,22 @@ class GoogleSheetsClient:
                 item[header] = str(row[i]).strip() if i < len(row) else ""
             parsed.append(item)
         return parsed
+
+    def preview_sheet(self, spreadsheet_id: str, sheet_gid: int) -> dict:
+        titles = self.get_sheet_titles(spreadsheet_id)
+        title = titles.get(sheet_gid)
+        if not title:
+            raise ValueError("That sheet tab was not found in this spreadsheet")
+        escaped = title.replace("'", "''")
+        result = (
+            self.service.spreadsheets()
+            .values()
+            .get(spreadsheetId=spreadsheet_id, range=f"'{escaped}'!A1:ZZ6", majorDimension="ROWS")
+            .execute()
+        )
+        rows = result.get("values", [])
+        headers = [str(cell).strip() for cell in rows[0]] if rows else []
+        sample = []
+        for row in rows[1:4]:
+            sample.append({headers[i]: str(row[i]).strip() if i < len(row) else "" for i in range(len(headers)) if headers[i]})
+        return {"title": title, "headers": [header for header in headers if header], "sample": sample, "tabs": [{"gid": gid, "title": name} for gid, name in titles.items()]}

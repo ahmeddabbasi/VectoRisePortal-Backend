@@ -6,6 +6,8 @@ from app.models.audit_log import AuditLog
 from app.models.data_source import DataSource
 from app.models.department import Department
 from app.models.employee import Employee
+from app.models.error_report import ErrorReport
+from app.models.task_document import TaskDocument
 from app.models.exception_record import ExceptionRecord
 from app.models.hr_evaluation import HREvaluation
 from app.models.lead import Lead
@@ -32,6 +34,7 @@ __all__ = [
     "AuditLog",
     "DataSource",
     "Department",
+    "ErrorReport",
     "Employee",
     "ExceptionRecord",
     "HREvaluation",
@@ -44,6 +47,7 @@ __all__ = [
     "Target",
     "Task",
     "TaskChecklistItem",
+    "TaskDocument",
     "TaskTimeLog",
     "TimeSession",
     "User",

@@ -10,6 +10,7 @@ from app.models.task import Task
 from app.models.task_checklist_item import TaskChecklistItem
 from app.models.task_time_log import TaskTimeLog
 from app.models.user import User
+from app.core.text_guard import EMPLOYEE_TASK_STATUSES
 from app.core.violations import raise_violation
 from app.services.audit import AuditService
 from app.services.exceptions import ExceptionService
@@ -161,6 +162,10 @@ class TaskService:
             raise HTTPException(status_code=404, detail="Task not found")
         if employee_owned:
             self._ensure_task_actionable(task)
+            data.pop("progress", None)
+            data.pop("estimated_minutes", None)
+            if data.get("status") and data["status"] not in EMPLOYEE_TASK_STATUSES:
+                raise HTTPException(status_code=400, detail="That status cannot be set on your own task")
         previous = {"status": task.status, "progress": task.progress}
         for field in ["title", "description", "priority", "due_date", "estimated_minutes", "status", "progress", "notes"]:
             if field in data and data[field] is not None:
@@ -184,9 +189,9 @@ class TaskService:
             self.audit.log("task_updated", user, "task", task.id, previous, {"status": task.status, "progress": task.progress})
         return task
 
-    def toggle_checklist_item(self, item_id: int, completed: bool, user: User | None = None):
+    def toggle_checklist_item(self, item_id: int, completed: bool, user: User | None = None, task_id: int | None = None):
         item = self.db.get(TaskChecklistItem, item_id)
-        if not item:
+        if not item or (task_id is not None and item.task_id != task_id):
             raise HTTPException(status_code=404, detail="Checklist item not found")
         task = self.db.get(Task, item.task_id)
         if task:
@@ -202,11 +207,12 @@ class TaskService:
 
     def start_timer(self, task_id: int, employee_id: int) -> TaskTimeLog:
         task = self.db.get(Task, task_id)
-        if task:
-            self._ensure_task_actionable(task)
+        if not task or task.assigned_employee_id != employee_id:
+            raise HTTPException(status_code=404, detail="Task not found")
+        self._ensure_task_actionable(task)
         log = TaskTimeLog(task_id=task_id, employee_id=employee_id, started_at=datetime.utcnow())
         self.db.add(log)
-        if task and task.status == TaskStatus.NOT_STARTED:
+        if task.status == TaskStatus.NOT_STARTED:
             task.status = TaskStatus.IN_PROGRESS
             task.started_at = datetime.utcnow()
         return log
