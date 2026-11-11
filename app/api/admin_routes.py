@@ -349,7 +349,10 @@ def calculate_performance(
 def list_task_documents(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     from app.models.task import Task
     from app.models.task_document import TaskDocument
+    from app.services.task_files import purge_expired_task_documents
 
+    if purge_expired_task_documents(db):
+        db.commit()
     rows = (
         db.query(TaskDocument, Task, Employee)
         .join(Task, Task.id == TaskDocument.task_id)
@@ -367,6 +370,7 @@ def list_task_documents(db: Session = Depends(get_db), _: User = Depends(require
             "original_name": doc.original_name,
             "size_bytes": doc.size_bytes,
             "created_at": doc.created_at,
+            "expires_at": doc.expires_at,
             "download_path": f"/api/media/tasks/{doc.stored_name}",
         }
         for doc, task, employee in rows

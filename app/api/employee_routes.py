@@ -327,8 +327,16 @@ def _document_payload(doc, task: Task, employee_name: str | None):
         "original_name": doc.original_name,
         "size_bytes": doc.size_bytes,
         "created_at": doc.created_at,
+        "expires_at": doc.expires_at,
         "download_path": f"/api/media/tasks/{doc.stored_name}",
     }
+
+
+def _drop_expired_documents(db: Session) -> None:
+    from app.services.task_files import purge_expired_task_documents
+
+    if purge_expired_task_documents(db):
+        db.commit()
 
 
 @router.get("/tasks/{task_id}/documents")
@@ -339,6 +347,7 @@ def list_my_task_documents(task_id: int, user: User = Depends(require_employee),
         raise HTTPException(status_code=404, detail="Task not found")
     from app.models.task_document import TaskDocument
 
+    _drop_expired_documents(db)
     docs = db.query(TaskDocument).filter(TaskDocument.task_id == task.id).order_by(TaskDocument.id.desc()).all()
     return [_document_payload(doc, task, employee.name) for doc in docs]
 
@@ -355,19 +364,29 @@ async def upload_task_document(
     if not task or task.employee_id != employee.id:
         raise HTTPException(status_code=404, detail="Task not found")
     from app.models.task_document import TaskDocument
-    from app.services.task_files import store_task_file
+    from app.services.notifications import NotificationService
+    from app.services.task_files import read_task_upload
 
-    stored, original, content_type, size = await store_task_file(task.id, file)
+    saved = await read_task_upload(task.id, file)
     doc = TaskDocument(
         task_id=task.id,
         uploaded_by_user_id=user.id,
-        original_name=original,
-        stored_name=stored,
-        content_type=content_type,
-        size_bytes=size,
+        original_name=saved["original_name"],
+        stored_name=saved["stored_name"],
+        content_type=saved["content_type"],
+        size_bytes=saved["size_bytes"],
+        content=saved["content"],
+        expires_at=saved["expires_at"],
     )
     db.add(doc)
-    AuditService(db).log("task_document_uploaded", user, "task", task.id, None, {"name": original})
+    AuditService(db).log("task_document_uploaded", user, "task", task.id, None, {"name": saved["original_name"]})
+    expires_label = saved["expires_at"].strftime("%d %b %Y, %H:%M UTC")
+    NotificationService(db).notify_admins(
+        "Task file uploaded",
+        f"{employee.name} uploaded {saved['original_name']} for {task.title}. Download it from Tasks. This file will be deleted on {expires_label}.",
+        "document",
+        "/admin/tasks",
+    )
     db.commit()
     db.refresh(doc)
     return _document_payload(doc, task, employee.name)
@@ -379,6 +398,7 @@ def review_documents(user: User = Depends(require_employee), db: Session = Depen
         raise HTTPException(status_code=403, detail="Task review access required")
     from app.models.task_document import TaskDocument
 
+    _drop_expired_documents(db)
     rows = (
         db.query(TaskDocument, Task, Employee)
         .join(Task, Task.id == TaskDocument.task_id)

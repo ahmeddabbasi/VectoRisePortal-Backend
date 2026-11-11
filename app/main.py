@@ -42,6 +42,20 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Database seed skipped (production mode)")
 
+    from app.services.task_files import purge_expired_task_documents
+
+    db = SessionLocal()
+    try:
+        removed = purge_expired_task_documents(db)
+        db.commit()
+        if removed:
+            logger.info("Removed %s expired task documents", removed)
+    except Exception:
+        db.rollback()
+        logger.exception("Expired document cleanup failed")
+    finally:
+        db.close()
+
     start_scheduler()
     yield
     stop_scheduler()

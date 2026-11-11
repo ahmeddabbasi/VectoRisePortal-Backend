@@ -60,10 +60,7 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
     if user:
         document_filters.append(TaskDocument.uploaded_by_user_id == user.id)
     if document_filters:
-        documents = db.query(TaskDocument).filter(or_(*document_filters)).all()
-        for document in documents:
-            _unlink_inside(settings.upload_path / "tasks", document.stored_name)
-            db.delete(document)
+        db.query(TaskDocument).filter(or_(*document_filters)).delete(synchronize_session=False)
         db.flush()
 
     if task_ids:

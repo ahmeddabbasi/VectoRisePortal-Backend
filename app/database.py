@@ -15,11 +15,10 @@ from app.config import settings
 
 
 def _normalize_database_url(url: str) -> str:
-
     if url.startswith("postgres://"):
-
-        return url.replace("postgres://", "postgresql://", 1)
-
+        url = "postgresql://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg2://" + url[len("postgresql://"):]
     return url
 
 
@@ -183,6 +182,11 @@ def migrate_schema():
         _add_column_if_missing("users", "sales_access BOOLEAN NOT NULL DEFAULT FALSE")
         _add_column_if_missing("users", "can_review_tasks BOOLEAN NOT NULL DEFAULT FALSE")
     _add_column_if_missing("data_sources", "column_map TEXT")
+    _add_column_if_missing("task_documents", "expires_at TIMESTAMP")
+    if _db_url.startswith("sqlite"):
+        _add_column_if_missing("task_documents", "content BLOB")
+    else:
+        _add_column_if_missing("task_documents", "content BYTEA")
 
     if not _db_url.startswith("sqlite"):
 

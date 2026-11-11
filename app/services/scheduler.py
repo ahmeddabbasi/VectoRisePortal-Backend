@@ -12,6 +12,22 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 
+def _purge_documents():
+    from app.services.task_files import purge_expired_task_documents
+
+    db = SessionLocal()
+    try:
+        removed = purge_expired_task_documents(db)
+        db.commit()
+        if removed:
+            logger.info("Removed %s expired task documents", removed)
+    except Exception:
+        db.rollback()
+        logger.exception("Expired document cleanup failed")
+    finally:
+        db.close()
+
+
 def _run_daily_jobs():
     from app.services.attendance_jobs import AttendanceJobService
 
@@ -54,6 +70,12 @@ def start_scheduler() -> BackgroundScheduler:
         _run_daily_jobs,
         CronTrigger(hour=settings.daily_jobs_hour, minute=settings.daily_jobs_minute),
         id="daily_jobs",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _purge_documents,
+        IntervalTrigger(hours=1),
+        id="purge_task_documents",
         replace_existing=True,
     )
     if settings.enable_sync_scheduler and settings.sync_interval_minutes > 0:
