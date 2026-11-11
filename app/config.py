@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 15
     enable_sync_scheduler: bool = True
 
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,https://vecto-rise-portal-frontend-psi.vercel.app"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,https://portal.vectorise.dev,https://vecto-rise-portal-frontend-psi.vercel.app"
 
     admin_email: str = "admin@vectoriseinc.dev"
     admin_password: str = "admin123"
@@ -57,7 +57,19 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        configured = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        # Keep the live portal allowed even when Render's CORS_ORIGINS still lists only the old Vercel host.
+        required = [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "https://portal.vectorise.dev",
+            "https://vecto-rise-portal-frontend-psi.vercel.app",
+        ]
+        origins: list[str] = []
+        for origin in [*required, *configured]:
+            if origin not in origins:
+                origins.append(origin)
+        return origins
 
     @property
     def upload_path(self) -> Path:

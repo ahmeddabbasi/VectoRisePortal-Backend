@@ -18,7 +18,7 @@ services:
       - key: JWT_SECRET
         generateValue: true
       - key: CORS_ORIGINS
-        value: https://vecto-rise-portal-frontend-psi.vercel.app
+        value: https://portal.vectorise.dev,https://vecto-rise-portal-frontend-psi.vercel.app
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
