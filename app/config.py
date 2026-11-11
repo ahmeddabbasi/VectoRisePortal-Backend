@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 15
     enable_sync_scheduler: bool = True
 
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000,https://vecto-rise-portal-frontend-psi.vercel.app"
 
     admin_email: str = "admin@vectoriseinc.dev"
     admin_password: str = "admin123"
