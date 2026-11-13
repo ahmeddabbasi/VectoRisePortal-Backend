@@ -122,18 +122,28 @@ def _record_error(request: Request, status_code: int, message: str) -> None:
         db.close()
 
 
+def _cors_response(request: Request, status_code: int, detail) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content={"detail": detail})
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_origin_list:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_error(request: Request, exc: StarletteHTTPException):
     if exc.status_code >= 500:
         _record_error(request, exc.status_code, str(exc.detail))
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return _cors_response(request, exc.status_code, exc.detail)
 
 
 @app.exception_handler(Exception)
 async def unhandled_error(request: Request, exc: Exception):
     logger.exception("Unhandled error on %s %s", request.method, request.url.path)
     _record_error(request, 500, exc.__class__.__name__)
-    return JSONResponse(status_code=500, content={"detail": "Something went wrong"})
+    return _cors_response(request, 500, "Something went wrong")
 
 
 @app.get("/health")

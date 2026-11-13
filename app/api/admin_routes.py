@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.deps import require_admin
@@ -33,6 +34,14 @@ from app.services.settings_service import DEFAULT_SETTINGS, SettingsService
 from app.services.tasks import TaskService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+def _next_employee_code(db: Session) -> str:
+    highest = 0
+    for (code,) in db.query(Employee.employee_code).all():
+        if code and code.startswith("EMP") and code[3:].isdigit():
+            highest = max(highest, int(code[3:]))
+    return f"EMP{highest + 1:04d}"
 
 
 def _employee_out(emp: Employee) -> EmployeeOut:
@@ -95,7 +104,7 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db), admi
         department_id=payload.department_id,
         role=payload.role,
         joining_date=payload.joining_date,
-        employee_code=f"EMP{db.query(Employee).count() + 1:04d}",
+        employee_code=_next_employee_code(db),
     )
     db.add(employee)
     db.flush()
@@ -109,7 +118,11 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db), admi
     )
     db.add(user)
     AuditService(db).log("employee_created", admin, "employee", employee.id, None, {"name": employee.name})
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="An employee with that name or email already exists")
     db.refresh(employee)
     return _employee_out(employee)
 
