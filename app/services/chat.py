@@ -194,6 +194,23 @@ class ChatService:
             .update({ChatMessage.read_at: datetime.utcnow()}, synchronize_session=False)
         )
 
+    def mark_all_read(self, user_id: int) -> int:
+        conv_ids = [
+            row.conversation_id
+            for row in self.db.query(ChatParticipant).filter(ChatParticipant.user_id == user_id).all()
+        ]
+        if not conv_ids:
+            return 0
+        return (
+            self.db.query(ChatMessage)
+            .filter(
+                ChatMessage.conversation_id.in_(conv_ids),
+                ChatMessage.sender_id != user_id,
+                ChatMessage.read_at.is_(None),
+            )
+            .update({ChatMessage.read_at: datetime.utcnow()}, synchronize_session=False)
+        )
+
     def resolve_user_id_for_employee(self, employee_id: int) -> int | None:
         user = self.db.query(User).filter(User.employee_id == employee_id).first()
         return user.id if user else None

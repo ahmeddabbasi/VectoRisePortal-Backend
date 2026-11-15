@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -34,6 +35,11 @@ from app.services.settings_service import DEFAULT_SETTINGS, SettingsService
 from app.services.tasks import TaskService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+class TeamAssignmentIn(BaseModel):
+    team_lead_id: int = Field(gt=0)
+    employee_id: int = Field(gt=0)
 
 
 def _next_employee_code(db: Session) -> str:
@@ -125,6 +131,50 @@ def create_employee(payload: EmployeeCreate, db: Session = Depends(get_db), admi
         raise HTTPException(status_code=400, detail="An employee with that name or email already exists")
     db.refresh(employee)
     return _employee_out(employee)
+
+
+@router.get("/team-assignments")
+def list_team_assignments(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    from app.models.team_lead import TeamLeadAssignment
+    from app.services.hierarchy import HierarchyService
+
+    rows = db.query(TeamLeadAssignment).order_by(TeamLeadAssignment.id.desc()).all()
+    ids = list({row.team_lead_id for row in rows} | {row.employee_id for row in rows})
+    names = {person["id"]: person["name"] for person in HierarchyService(db).people(ids)}
+    return [
+        {
+            "id": row.id,
+            "team_lead_id": row.team_lead_id,
+            "team_lead_name": names.get(row.team_lead_id),
+            "employee_id": row.employee_id,
+            "employee_name": names.get(row.employee_id),
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
+
+
+@router.post("/team-assignments")
+def create_team_assignment(payload: TeamAssignmentIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    from app.services.hierarchy import HierarchyService
+
+    row = HierarchyService(db).assign(payload.team_lead_id, payload.employee_id, admin.id)
+    db.commit()
+    return {"id": row.id, "team_lead_id": row.team_lead_id, "employee_id": row.employee_id}
+
+
+@router.delete("/team-assignments")
+def delete_team_assignment(
+    team_lead_id: int,
+    employee_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    from app.services.hierarchy import HierarchyService
+
+    HierarchyService(db).remove(team_lead_id, employee_id)
+    db.commit()
+    return {"status": "removed"}
 
 
 @router.put("/employees/{employee_id}", response_model=EmployeeOut)

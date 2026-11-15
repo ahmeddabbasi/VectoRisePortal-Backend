@@ -14,6 +14,7 @@ from app.api.media_routes import router as media_router
 from app.api.notification_routes import router as notification_router
 from app.api.hrm_routes import router as hrm_router
 from app.api.sales_routes import router as sales_router
+from app.api.team_routes import router as team_router
 from app.bootstrap import ensure_google_credentials
 from app.config import settings
 from app.database import SessionLocal, init_db
@@ -99,6 +100,7 @@ app.include_router(sales_router)
 app.include_router(chat_router)
 app.include_router(notification_router)
 app.include_router(media_router)
+app.include_router(team_router)
 
 
 def _record_error(request: Request, status_code: int, message: str) -> None:

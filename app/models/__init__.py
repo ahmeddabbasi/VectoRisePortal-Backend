@@ -18,6 +18,8 @@ from app.models.sync_run import SyncRun
 from app.models.system_setting import SystemSetting
 from app.models.target import Target
 from app.models.task import Task
+from app.models.task_review import TaskReview
+from app.models.team_lead import TeamLeadAssignment
 from app.models.task_checklist_item import TaskChecklistItem
 from app.models.task_time_log import TaskTimeLog
 from app.models.time_session import TimeSession
@@ -48,7 +50,9 @@ __all__ = [
     "Task",
     "TaskChecklistItem",
     "TaskDocument",
+    "TaskReview",
     "TaskTimeLog",
+    "TeamLeadAssignment",
     "TimeSession",
     "User",
     "WorkSchedule",

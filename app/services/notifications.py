@@ -51,6 +51,13 @@ class NotificationService:
             note.is_read = True
         return note
 
+    def mark_all_read(self, user_id: int) -> int:
+        return (
+            self.db.query(Notification)
+            .filter(Notification.user_id == user_id, Notification.is_read.is_(False))
+            .update({Notification.is_read: True}, synchronize_session=False)
+        )
+
     def notify_admins(self, title: str, message: str, notification_type: str = "system", link: str | None = None):
         admins = self.db.query(User).filter(User.role == "admin", User.is_active.is_(True)).all()
         for admin in admins:

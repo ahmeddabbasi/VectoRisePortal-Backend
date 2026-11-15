@@ -70,6 +70,13 @@ def chat_unread_count(user: User = Depends(get_current_user), db: Session = Depe
     return {"count": ChatService(db).unread_total(user.id)}
 
 
+@router.post("/read-all")
+def mark_all_messages_read(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    updated = ChatService(db).mark_all_read(user.id)
+    db.commit()
+    return {"status": "ok", "updated": updated}
+
+
 @router.post("/conversations")
 def create_conversation(payload: ConversationCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     conv = ChatService(db).create_conversation(user, payload.participant_user_ids, payload.title)

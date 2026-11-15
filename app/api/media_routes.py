@@ -72,9 +72,12 @@ def task_document(filename: str, user: User = Depends(get_current_user), db: Ses
     if not doc or not doc.content:
         raise HTTPException(status_code=404, detail="Not found")
     task = db.get(Task, doc.task_id)
-    allowed = user.role == UserRole.ADMIN or user.can_review_tasks or (task and user.employee_id == task.employee_id)
-    if not allowed:
+    from app.services.hierarchy import HierarchyService
+
+    if not task:
         raise HTTPException(status_code=404, detail="Not found")
+    if not HierarchyService(db).can_view_task(user, task):
+        raise HTTPException(status_code=403, detail="You cannot view that document")
 
     download_name = _SAFE_NAME.sub("", doc.original_name).strip() or filename
     return Response(

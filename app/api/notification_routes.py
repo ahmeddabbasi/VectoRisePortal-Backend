@@ -20,6 +20,13 @@ def notification_unread_count(days: int = 3, user: User = Depends(get_current_us
     return {"count": NotificationService(db).unread_count(user.id, days=days)}
 
 
+@router.post("/read-all")
+def mark_all_notifications_read(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    updated = NotificationService(db).mark_all_read(user.id)
+    db.commit()
+    return {"status": "ok", "updated": updated}
+
+
 @router.post("/{notification_id}/read")
 def mark_notification_read(notification_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     NotificationService(db).mark_read(notification_id, user.id)

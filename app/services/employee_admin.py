@@ -64,6 +64,9 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
         db.flush()
 
     if task_ids:
+        from app.models.task_review import TaskReview
+
+        db.query(TaskReview).filter(TaskReview.task_id.in_(task_ids)).delete(synchronize_session=False)
         db.query(TaskChecklistItem).filter(TaskChecklistItem.task_id.in_(task_ids)).delete(synchronize_session=False)
         db.query(TaskTimeLog).filter(TaskTimeLog.task_id.in_(task_ids)).delete(synchronize_session=False)
     db.query(TaskTimeLog).filter(TaskTimeLog.employee_id == employee.id).delete(synchronize_session=False)
@@ -87,6 +90,13 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
         db.query(Announcement).filter(Announcement.created_by_user_id == user.id).update(
             {Announcement.created_by_user_id: admin.id}, synchronize_session=False
         )
+        from app.models.task_review import TaskReview
+        from app.models.team_lead import TeamLeadAssignment
+
+        db.query(TaskReview).filter(TaskReview.reviewer_user_id == user.id).delete(synchronize_session=False)
+        db.query(TeamLeadAssignment).filter(TeamLeadAssignment.created_by == user.id).update(
+            {TeamLeadAssignment.created_by: None}, synchronize_session=False
+        )
         db.query(Notification).filter(Notification.user_id == user.id).delete(synchronize_session=False)
         db.query(ChatMessage).filter(ChatMessage.sender_id == user.id).delete(synchronize_session=False)
         db.query(ChatParticipant).filter(ChatParticipant.user_id == user.id).delete(synchronize_session=False)
@@ -98,6 +108,11 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
     db.query(ExceptionRecord).filter(ExceptionRecord.employee_id == employee.id).delete(synchronize_session=False)
     db.query(PerformanceScore).filter(PerformanceScore.employee_id == employee.id).delete(synchronize_session=False)
     db.query(HREvaluation).filter(HREvaluation.employee_id == employee.id).delete(synchronize_session=False)
+    from app.models.team_lead import TeamLeadAssignment
+
+    db.query(TeamLeadAssignment).filter(
+        (TeamLeadAssignment.employee_id == employee.id) | (TeamLeadAssignment.team_lead_id == employee.id)
+    ).delete(synchronize_session=False)
     db.query(Target).filter(Target.employee_id == employee.id).delete(synchronize_session=False)
 
     activity_filters = [Activity.employee_id == employee.id]

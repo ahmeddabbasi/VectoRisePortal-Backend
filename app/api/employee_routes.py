@@ -341,15 +341,19 @@ def _drop_expired_documents(db: Session) -> None:
 
 @router.get("/tasks/{task_id}/documents")
 def list_my_task_documents(task_id: int, user: User = Depends(require_employee), db: Session = Depends(get_db)):
-    employee = _require_employee_record(user, db)
+    from app.services.hierarchy import HierarchyService
+
     task = db.get(Task, task_id)
-    if not task or task.employee_id != employee.id:
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if not HierarchyService(db).can_view_task(user, task):
+        raise HTTPException(status_code=403, detail="You cannot view documents for that task")
     from app.models.task_document import TaskDocument
 
     _drop_expired_documents(db)
     docs = db.query(TaskDocument).filter(TaskDocument.task_id == task.id).order_by(TaskDocument.id.desc()).all()
-    return [_document_payload(doc, task, employee.name) for doc in docs]
+    assignee = db.get(Employee, task.assigned_employee_id)
+    return [_document_payload(doc, task, assignee.name if assignee else None) for doc in docs]
 
 
 @router.post("/tasks/{task_id}/documents")
@@ -361,8 +365,10 @@ async def upload_task_document(
 ):
     employee = _require_employee_record(user, db)
     task = db.get(Task, task_id)
-    if not task or task.employee_id != employee.id:
+    if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.assigned_employee_id != employee.id:
+        raise HTTPException(status_code=403, detail="Only the assigned employee can upload documents")
     from app.models.task_document import TaskDocument
     from app.services.notifications import NotificationService
     from app.services.task_files import read_task_upload
