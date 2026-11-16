@@ -168,11 +168,11 @@ def delete_team_assignment(
     team_lead_id: int,
     employee_id: int,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     from app.services.hierarchy import HierarchyService
 
-    HierarchyService(db).remove(team_lead_id, employee_id)
+    HierarchyService(db).remove(team_lead_id, employee_id, admin)
     db.commit()
     return {"status": "removed"}
 
@@ -300,7 +300,11 @@ def create_evaluation(payload: HREvaluationIn, db: Session = Depends(get_db), ad
         evidence=payload.evidence,
     )
     db.add(evaluation)
+    db.flush()
     AuditService(db).log("hr_evaluation_created", admin, "hr_evaluation", payload.employee_id, None, {"score": payload.score})
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).performance_review(admin, evaluation)
     db.commit()
     return {"status": "ok", "id": evaluation.id}
 

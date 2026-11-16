@@ -385,7 +385,11 @@ async def upload_task_document(
         expires_at=saved["expires_at"],
     )
     db.add(doc)
+    db.flush()
     AuditService(db).log("task_document_uploaded", user, "task", task.id, None, {"name": saved["original_name"]})
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).document_uploaded(user, task, doc)
     expires_label = saved["expires_at"].strftime("%d %b %Y, %H:%M UTC")
     NotificationService(db).notify_admins(
         "Task file uploaded",

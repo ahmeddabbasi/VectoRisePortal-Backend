@@ -19,6 +19,7 @@ class User(Base):
     sales_access: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     can_review_tasks: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     employee: Mapped["Employee | None"] = relationship(back_populates="user")
     notifications: Mapped[list["Notification"]] = relationship(back_populates="user")

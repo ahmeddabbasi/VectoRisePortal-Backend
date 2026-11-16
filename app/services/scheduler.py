@@ -34,6 +34,9 @@ def _run_daily_jobs():
     db = SessionLocal()
     try:
         result = AttendanceJobService(db).run_daily_jobs()
+        from app.services.oversight_alerts import run_oversight_alerts
+
+        result["oversight_alerts"] = run_oversight_alerts(db)
         db.commit()
         logger.info("Daily jobs completed: %s", result)
     except Exception:

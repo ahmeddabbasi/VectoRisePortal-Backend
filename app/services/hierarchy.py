@@ -89,9 +89,13 @@ class HierarchyService:
         )
         self.db.add(row)
         self.db.flush()
+        from app.services.activity_log import ActivityLogService
+
+        actor = self.db.get(User, created_by) if created_by else None
+        ActivityLogService(self.db).team_assigned(actor, team_lead_id, employee_id, row.id)
         return row
 
-    def remove(self, team_lead_id: int, employee_id: int) -> None:
+    def remove(self, team_lead_id: int, employee_id: int, actor: User | None = None) -> None:
         row = (
             self.db.query(TeamLeadAssignment)
             .filter(
@@ -102,6 +106,9 @@ class HierarchyService:
         )
         if not row:
             raise HTTPException(status_code=404, detail="That assignment was not found")
+        from app.services.activity_log import ActivityLogService
+
+        ActivityLogService(self.db).team_removed(actor, team_lead_id, employee_id, row.id)
         self.db.delete(row)
 
     def people(self, employee_ids: list[int]) -> list[dict]:

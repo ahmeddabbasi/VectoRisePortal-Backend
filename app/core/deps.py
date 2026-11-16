@@ -34,6 +34,9 @@ def get_current_user(
     )
     if not user or int(user.token_version or 0) != token_version:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).touch_last_active(user)
     return user
 
 

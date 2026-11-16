@@ -79,6 +79,9 @@ class TaskService:
             self._generate_checklist(task)
         if assigned_by:
             self.audit.log("task_created", assigned_by, "task", task.id, None, {"title": task.title})
+            from app.services.activity_log import ActivityLogService
+
+            ActivityLogService(self.db).task_created(assigned_by, task)
             NotificationService(self.db).notify_employee(
                 task.assigned_employee_id,
                 "New task assigned",
@@ -105,6 +108,9 @@ class TaskService:
         )
         self.db.add(task)
         self.db.flush()
+        from app.services.activity_log import ActivityLogService
+
+        ActivityLogService(self.db).task_created(user, task)
         self.audit.log("task_submitted", user, "task", task.id, None, {"title": task.title})
         NotificationService(self.db).notify_admins(
             "Task approval needed",
@@ -166,7 +172,7 @@ class TaskService:
             data.pop("estimated_minutes", None)
             if data.get("status") and data["status"] not in EMPLOYEE_TASK_STATUSES:
                 raise HTTPException(status_code=400, detail="That status cannot be set on your own task")
-        previous = {"status": task.status, "progress": task.progress}
+        previous = {"status": task.status, "due_date": task.due_date, "notes": task.notes}
         for field in ["title", "description", "priority", "due_date", "estimated_minutes", "status", "progress", "notes"]:
             if field in data and data[field] is not None:
                 setattr(task, field, data[field])
@@ -186,7 +192,10 @@ class TaskService:
                 task.id,
             )
         if user:
-            self.audit.log("task_updated", user, "task", task.id, previous, {"status": task.status, "progress": task.progress})
+            self.audit.log("task_updated", user, "task", task.id, {"status": previous["status"]}, {"status": task.status, "progress": task.progress})
+            from app.services.activity_log import ActivityLogService
+
+            ActivityLogService(self.db).task_changes(user, task, previous)
         return task
 
     def toggle_checklist_item(self, item_id: int, completed: bool, user: User | None = None, task_id: int | None = None):

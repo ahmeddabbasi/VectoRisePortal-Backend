@@ -1,4 +1,6 @@
 from app.models.activity import Activity
+from app.models.activity_log import ActivityLog
+from app.models.oversight_alert import OversightAlert
 from app.models.announcement import Announcement
 from app.models.chat import ChatConversation, ChatMessage, ChatParticipant
 from app.models.attendance_record import AttendanceRecord
@@ -28,6 +30,8 @@ from app.models.work_schedule import WorkSchedule
 
 __all__ = [
     "Activity",
+    "ActivityLog",
+    "OversightAlert",
     "Announcement",
     "ChatConversation",
     "ChatMessage",

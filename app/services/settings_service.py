@@ -49,6 +49,14 @@ DEFAULT_SETTINGS = {
 
     "incomplete_attendance_policy": ("incomplete", "Policy for missing check-in/out: incomplete or absent"),
 
+    "oversight_inactive_days": ("7", "Days without activity before a team is inactive"),
+
+    "oversight_task_overdue_days": ("1", "Days past the due date before admins are alerted"),
+
+    "oversight_review_pending_days": ("3", "Days a completed task can wait for review before an alert"),
+
+    "oversight_review_period_days": ("30", "Days between performance reviews for each direct report"),
+
 }
 
 
@@ -132,6 +140,14 @@ class SettingsService:
         elif key == "incomplete_attendance_policy":
             if cleaned not in {"incomplete", "absent"}:
                 raise HTTPException(status_code=400, detail="Unsupported attendance policy")
+        elif key.startswith("oversight_"):
+            try:
+                number = int(cleaned)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Setting must be a whole number")
+            if number < 1 or number > 365:
+                raise HTTPException(status_code=400, detail="Use a whole number from 1 to 365")
+            cleaned = str(number)
         else:
             try:
                 number = int(cleaned)

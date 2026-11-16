@@ -24,6 +24,9 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
     login_guard.succeed(payload.email)
     employee = db.get(Employee, user.employee_id) if user.employee_id else None
     AuditService(db).log("login", user)
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).login(user)
     db.commit()
     return TokenResponse(
         access_token=create_access_token(user.email, user.role, user.employee_id, user.token_version or 0),

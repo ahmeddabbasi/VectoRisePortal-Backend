@@ -60,6 +60,12 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
     if user:
         document_filters.append(TaskDocument.uploaded_by_user_id == user.id)
     if document_filters:
+        from app.services.activity_log import ActivityLogService
+
+        doomed = db.query(TaskDocument.id, TaskDocument.task_id, TaskDocument.original_name).filter(or_(*document_filters)).all()
+        log = ActivityLogService(db)
+        for document_id, task_id, original_name in doomed:
+            log.document_removed(db.get(Task, task_id), document_id, original_name, "employee_deleted")
         db.query(TaskDocument).filter(or_(*document_filters)).delete(synchronize_session=False)
         db.flush()
 
@@ -109,7 +115,14 @@ def delete_employee(db: Session, employee_id: int, admin: User) -> None:
     db.query(PerformanceScore).filter(PerformanceScore.employee_id == employee.id).delete(synchronize_session=False)
     db.query(HREvaluation).filter(HREvaluation.employee_id == employee.id).delete(synchronize_session=False)
     from app.models.team_lead import TeamLeadAssignment
+    from app.services.activity_log import ActivityLogService
 
+    pairs = db.query(TeamLeadAssignment).filter(
+        (TeamLeadAssignment.employee_id == employee.id) | (TeamLeadAssignment.team_lead_id == employee.id)
+    ).all()
+    removal_log = ActivityLogService(db)
+    for pair in pairs:
+        removal_log.team_removed(admin, pair.team_lead_id, pair.employee_id, pair.id)
     db.query(TeamLeadAssignment).filter(
         (TeamLeadAssignment.employee_id == employee.id) | (TeamLeadAssignment.team_lead_id == employee.id)
     ).delete(synchronize_session=False)

@@ -126,7 +126,11 @@ def review_task(
         status=payload.status,
     )
     db.add(review)
+    db.flush()
     AuditService(db).log("task_reviewed", user, "task", task.id, None, {"status": payload.status})
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).task_review(user, task, review)
     db.commit()
     return {"id": review.id, "status": review.status}
 
@@ -151,6 +155,10 @@ def review_performance(
         evidence=payload.evidence,
     )
     db.add(evaluation)
+    db.flush()
     AuditService(db).log("hr_evaluation_created", user, "hr_evaluation", employee_id, None, {"score": payload.score})
+    from app.services.activity_log import ActivityLogService
+
+    ActivityLogService(db).performance_review(user, evaluation)
     db.commit()
     return {"id": evaluation.id, "period_end": str(evaluation.period_end or date.today())}

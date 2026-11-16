@@ -30,16 +30,29 @@ def expiry_from(uploaded_at: datetime | None = None) -> datetime:
 def purge_expired_task_documents(db: Session) -> int:
     now = datetime.utcnow()
     cutoff = now - timedelta(days=RETENTION_DAYS)
-    return (
-        db.query(TaskDocument)
+    rows = (
+        db.query(TaskDocument.id, TaskDocument.task_id, TaskDocument.original_name)
         .filter(
             or_(
                 and_(TaskDocument.expires_at.is_not(None), TaskDocument.expires_at <= now),
                 and_(TaskDocument.expires_at.is_(None), TaskDocument.created_at <= cutoff),
             )
         )
-        .delete(synchronize_session=False)
+        .all()
     )
+    if not rows:
+        return 0
+    from app.models.task import Task
+    from app.services.activity_log import ActivityLogService
+
+    log = ActivityLogService(db)
+    ids = []
+    for document_id, task_id, original_name in rows:
+        task = db.get(Task, task_id)
+        log.document_removed(task, document_id, original_name, "expired")
+        ids.append(document_id)
+    db.query(TaskDocument).filter(TaskDocument.id.in_(ids)).delete(synchronize_session=False)
+    return len(ids)
 
 
 def _kind(content: bytes, filename: str) -> str:

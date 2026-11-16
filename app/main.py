@@ -15,6 +15,7 @@ from app.api.notification_routes import router as notification_router
 from app.api.hrm_routes import router as hrm_router
 from app.api.sales_routes import router as sales_router
 from app.api.team_routes import router as team_router
+from app.api.oversight_routes import router as oversight_router
 from app.bootstrap import ensure_google_credentials
 from app.config import settings
 from app.database import SessionLocal, init_db
@@ -42,6 +43,18 @@ async def lifespan(app: FastAPI):
             db.close()
     else:
         logger.info("Database seed skipped (production mode)")
+
+    from app.services.activity_log import run_backfill
+
+    db = SessionLocal()
+    try:
+        run_backfill(db)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Activity backfill failed")
+    finally:
+        db.close()
 
     from app.services.task_files import purge_expired_task_documents
 
@@ -101,6 +114,7 @@ app.include_router(chat_router)
 app.include_router(notification_router)
 app.include_router(media_router)
 app.include_router(team_router)
+app.include_router(oversight_router)
 
 
 def _record_error(request: Request, status_code: int, message: str) -> None:

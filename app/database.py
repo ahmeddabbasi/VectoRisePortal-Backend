@@ -181,6 +181,7 @@ def migrate_schema():
     else:
         _add_column_if_missing("users", "sales_access BOOLEAN NOT NULL DEFAULT FALSE")
         _add_column_if_missing("users", "can_review_tasks BOOLEAN NOT NULL DEFAULT FALSE")
+    _add_column_if_missing("users", "last_active_at TIMESTAMP")
     _add_column_if_missing("data_sources", "column_map TEXT")
     _add_column_if_missing("task_documents", "expires_at TIMESTAMP")
     if _db_url.startswith("sqlite"):
